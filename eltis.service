@@ -1,0 +1,11 @@
+[Unit]
+Description=Neirolis - ELTIS door service
+After=network.target
+
+[Service]
+ExecStart=/srv/eltis/eltis
+WorkingDirectory=/srv/eltis
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target

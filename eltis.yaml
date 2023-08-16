@@ -1,0 +1,21 @@
+type: devices
+name: eltis
+desc: ELTIS DP5000.B2-XX
+
+source: https://rtmip.info/devices/eltis.zip
+
+exec:
+  - mkdir -p /srv/eltis/
+  - cp -f $PKGDIR/* /srv/eltis/
+  - cp -f /srv/eltis/eltis.service /usr/lib/systemd/system/
+  - systemctl daemon-reload
+  - systemctl restart eltis
+
+devices:
+  - name: eltis
+    uuid: ae2371e6-25ca-4614-86a3-01b8c167d794
+    type: HTTP
+    addr: 127.0.0.1:6976
+    duration: 5
+    handler_data:
+      method: POST
