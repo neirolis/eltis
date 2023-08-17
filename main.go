@@ -1,7 +1,9 @@
 package main
 
 import (
+	"errors"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -14,16 +16,18 @@ import (
 )
 
 var log = logging.MustGetLogger("ELTIS")
+var version = "v1.0.0"
 
 var MsgInit = []byte{0x7F, 0x7F, 0x0A, 0x01}
 var MsgOpen = []byte{0x7F, 0x40, 0x06, 0x0f}
+var door sync.Mutex
 
 var args struct {
-	Device string `help:"path to device" default:"/dev/ttyACM0"`
 	Listen string `help:"http listen address" default:":6976"`
 }
 
 func init() {
+	argum.Version = version
 	argum.MustParse(&args)
 
 	logging.SetBackend(logging.NewBackendFormatter(
@@ -33,28 +37,15 @@ func init() {
 }
 
 func main() {
-	ctrl, err := NewController(args.Device)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// initialize the driver mainly to check that the device is available
-	if port, err := ctrl.dial(); err == nil {
-		if err := ctrl.write(port, MsgInit); err != nil {
-			log.Errorf("failed to initialize driver: %v", err)
-		}
-	} else {
-		// INFO: maybe a fatal error is needed here?
-		log.Error("connection failed: %v", err)
-	}
-
-	// initialize web server
 	app := fiber.New(fiber.Config{ErrorHandler: ErrHandler})
 	app.Use(logger.New())
 	app.Use(recover.New())
 
-	app.Get("/", ctrl.Open)
-	app.Post("/", ctrl.Open)
+	app.Get("/", Open)
+	app.Post("/", Open)
+
+	app.Get("/open/:id", Open)
+	app.Post("/open/:id", Open)
 
 	if err := app.Listen(args.Listen); err != nil {
 		log.Fatal(err)
@@ -73,29 +64,23 @@ func ErrHandler(c *fiber.Ctx, err error) error {
 	return c.Status(code).JSON(err)
 }
 
-type Controller struct {
-	conf *serial.Config
+func Open(c *fiber.Ctx) error {
+	door.Lock()
+	defer door.Unlock()
 
-	sync.Mutex
-}
+	id, _ := c.ParamsInt("id", 0)
+	msgOpen := append([]byte{}, MsgOpen...)
+	msgOpen[1] += uint8(id)
 
-func NewController(device string) (ctrl *Controller, err error) {
-	ctrl = &Controller{
-		conf: &serial.Config{
-			Name:        device,
-			Baud:        9600,
-			ReadTimeout: 5 * time.Second,
-		},
+	log.Debug("open:", id)
+
+	ctrl, err := NewControllerAuto()
+	if err != nil {
+		log.Error("controller failed:", err)
+		return err
 	}
 
-	return ctrl, nil
-}
-
-func (ctrl *Controller) Open(c *fiber.Ctx) error {
-	ctrl.Lock()
-	defer ctrl.Unlock()
-
-	log.Debug("open...")
+	log.Debug("file:", ctrl.conf.Name)
 
 	// open port
 	port, err := ctrl.dial()
@@ -103,6 +88,7 @@ func (ctrl *Controller) Open(c *fiber.Ctx) error {
 		log.Error("connection failed:", err)
 		return err
 	}
+	defer port.Close()
 
 	// init driver
 	if err := ctrl.write(port, MsgInit); err != nil {
@@ -116,16 +102,47 @@ func (ctrl *Controller) Open(c *fiber.Ctx) error {
 	}
 
 	// open door
-	if err := ctrl.write(port, MsgOpen); err != nil {
+	if err := ctrl.write(port, msgOpen); err != nil {
 		log.Error("open failed:", err)
 		return err
 	}
 
-	port.Close()
-
 	log.Debug("done")
 
 	return c.JSON(fiber.Map{"success": "true"})
+}
+
+//
+// controller
+//
+
+type Controller struct {
+	conf *serial.Config
+}
+
+func NewControllerAuto() (ctrl *Controller, err error) {
+	files, err := filepath.Glob("/dev/ttyACM*")
+	if err != nil {
+		return nil, err
+	}
+
+	if len(files) == 0 {
+		return nil, errors.New("device interface not found")
+	}
+
+	return NewController(files[0])
+}
+
+func NewController(device string) (ctrl *Controller, err error) {
+	ctrl = &Controller{
+		conf: &serial.Config{
+			Name:        device,
+			Baud:        9600,
+			ReadTimeout: 5 * time.Second,
+		},
+	}
+
+	return ctrl, nil
 }
 
 func (ctrl *Controller) dial() (port *serial.Port, err error) {
