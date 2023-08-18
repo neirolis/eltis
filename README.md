@@ -27,3 +27,8 @@ After the driver is initialized, you can open the doors:
 `[30]bytes{0x7F, 0x40, 0x06, 0x0f, ...0x00}`
 
 To specify the door ID, must specify: `0x40`+`doorID`, for example: `0x40`+`1` = `0x41` to open the door with the ID `1`.
+
+## TODO:
+
+1. Authorization
+2. Discovery serial interface by vendorID:productID
